@@ -9,6 +9,8 @@
 #define BUTTON_OK_PIN 9
 #define BUTTON_PLUS_PIN 8
 
+#define WATERING_SYSTEM_PIN 7
+
 
 class TemperatureSensor
 {  
@@ -37,11 +39,6 @@ class TemperatureSensor
   int tempSensorPin;
 };
 
-enum class DayTime
-{
-  Day,
-  Night
-};
 
 class PhotoResistor
 {
@@ -85,11 +82,6 @@ class PhotoResistor
     return !IsDay();
   }
 
-  DayTime GetDayTime()
-  {
-    if(IsDay()) return DayTime::Day;
-    else return DayTime::Night;
-  }
 
   private:
   int photoResistorPin;
@@ -159,12 +151,40 @@ class Button
 };
 
 
+class WateringSystem
+{
+  public:
+  WateringSystem(int pin)
+  :wateringSystemPin(pin)
+  {
+  }
+
+  void Init()
+  {
+    pinMode(wateringSystemPin, OUTPUT);
+  }
+
+  void TurnOn()
+  {
+    digitalWrite(wateringSystemPin,HIGH);
+  }
+
+  void TurnOff()
+  {
+    digitalWrite(wateringSystemPin,LOW);
+  }
+
+  private:
+  int wateringSystemPin;
+};
+
 //DISPLAY DATA PIN  - 19
 //DISPLAY CLOCK PIN - 18
 LiquidCrystal_I2C lcd(0x27,16,2);
 PhotoResistor photoResistor(PHOTORESISTOR_PIN);
 TemperatureSensor temperatureSensor(TEMPERATURE_SENSOR_PIN);
 SoilMoistureSensor soilMoistureSensor(SOIL_MOISTURE_SENSOR_PIN);
+WateringSystem wateringSystem(WATERING_SYSTEM_PIN);
 
 Button minusButton(BUTTON_MINUS_PIN);
 Button okButton(BUTTON_OK_PIN);
@@ -173,13 +193,15 @@ Button plusButton(BUTTON_PLUS_PIN);
 enum class Tab
 {
   Main = 0,
-  Moisture,
-  DayTime
+  MoistureLevel,
+  DayTime,
+  Count
 };
+const int TAB_COUNT = static_cast<int>(Tab::Count);
 
 
 Tab selectedTab = Tab::Main;
-DayTime selectedDayTime = DayTime::Day;
+bool selectedDayTime = true;
 int selectedMoisturePercentage = 25;
 
 void setup()
@@ -187,6 +209,8 @@ void setup()
   	minusButton.Init();
   	okButton.Init();
   	plusButton.Init();
+
+    wateringSystem.Init();
   
     lcd.init();
     lcd.backlight();
@@ -200,7 +224,8 @@ void MainTab()
 {
    	lcd.setCursor(0, 0);
   	float temperature = roundf(temperatureSensor.GetTemperature() * 10) / 10.0;
-  	lcd.print(temperature);
+  	int moisturePercentage = soilMoistureSensor.CalculateMoisturePercentage();
+    lcd.print(temperature);
   	lcd.print("C  ");
   
   
@@ -209,12 +234,68 @@ void MainTab()
     lcd.setCursor(0, 1);
     //lcd.print(photoResistor.GetLight());
   	lcd.print("Moisture: ");
-  	lcd.print(soilMoistureSensor.CalculateMoisturePercentage());
+  	lcd.print(moisturePercentage);
   	lcd.print("%  ");
 }
 
 
+void MoistureLevelTab()
+{
+  lcd.setCursor(0, 0);
+  lcd.print("Select Moisture:");
+  lcd.setCursor(0, 1);
+  lcd.print(selectedMoisturePercentage);
+  lcd.print("%  ");
+
+  if(minusButton.IsClicked())
+  {
+    selectedMoisturePercentage = max(0,min(selectedMoisturePercentage-1,100));
+    delay(50);
+  }
+  else if(plusButton.IsClicked())
+  {
+    selectedMoisturePercentage = max(0,min(selectedMoisturePercentage+1,100));
+    delay(50);
+  }
+}
+
+void DayTimeTab()
+{
+  lcd.setCursor(0, 0);
+  lcd.print("Select DayTime:");
+  lcd.setCursor(0, 1);
+  lcd.print(selectedDayTime?"Day":"Night");
+  lcd.print("  ");
+  if(minusButton.IsClicked() || plusButton.IsClicked())
+  {
+    selectedDayTime = !selectedDayTime;
+    delay(50);
+  }
+}
+
+void waterIfNeeded()
+{
+  int moisturePercentage = soilMoistureSensor.CalculateMoisturePercentage();
+  bool isDay = photoResistor.IsDay();
+
+  if(isDay == selectedDayTime && (moisturePercentage <= selectedMoisturePercentage))
+    wateringSystem.TurnOn();
+  else 
+    wateringSystem.TurnOff();
+}
+
 void loop()
 {
-	MainTab();
+  if(selectedTab == Tab::Main) MainTab();
+  else if(selectedTab == Tab::MoistureLevel) MoistureLevelTab();
+  else if(selectedTab == Tab::DayTime) DayTimeTab();
+  
+  if(okButton.IsClicked()) 
+  {
+    lcd.clear();
+    selectedTab = static_cast<Tab>((static_cast<int>(selectedTab) + 1) % TAB_COUNT);
+    delay(50);
+  }
+
+  waterIfNeeded();
 }
